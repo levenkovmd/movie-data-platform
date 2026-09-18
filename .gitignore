@@ -1,6 +1,7 @@
 __pycache__/
 
 .env
+*.рус
 
 data/raw/*
 data/processed/*
