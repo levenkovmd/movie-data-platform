@@ -56,5 +56,41 @@ languages.printSchema()
 languages.show(10, truncate=False)
 print("Количество связей фильм-язык:", languages.count())
 
+actors = spark.read.parquet(
+    "data/processed/tmdb/movie_actors"
+)
+
+print("\nMOVIE ACTORS")
+
+actors.printSchema()
+
+actors.show(
+    10,
+    truncate=False
+)
+
+print(
+    "Количество связей фильм-актер:",
+    actors.count()
+)
+
+
+directors = spark.read.parquet(
+    "data/processed/tmdb/movie_directors"
+)
+
+print("\nMOVIE DIRECTORS")
+
+directors.printSchema()
+
+directors.show(
+    10,
+    truncate=False
+)
+
+print(
+    "Количество связей фильм-режиссер:",
+    directors.count()
+)
 
 spark.stop()
