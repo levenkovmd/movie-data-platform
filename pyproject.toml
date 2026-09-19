@@ -1,0 +1,20 @@
+[project]
+name = "movie-data-platform"
+version = "0.1.0"
+description = "Movie data platform built with TMDB API, Apache Spark and Airflow"
+readme = "README.md"
+authors = [
+    { name = "Maksim Levenkov", email = "levenkov-maksim-04@yandex.ru" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pyspark>=4.2.0",
+    "python-dotenv>=1.2.3",
+    "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
