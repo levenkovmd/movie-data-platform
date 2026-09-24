@@ -50,7 +50,9 @@ def check_movie_ids(df, table_name, movies):
         .select("movie_id")
         .distinct()
         .join(
-            movies.select("movie_id").distinct(),
+            movies
+            .select("movie_id")
+            .distinct(),
             on="movie_id",
             how="left_anti"
         )
@@ -68,7 +70,25 @@ def check_movie_ids(df, table_name, movies):
             truncate=False
         )
 
-    return False
+    return count > 0
+
+
+def check_vote_average(movies):
+    invalid_count = (
+        movies
+        .filter(
+            (col("vote_average") < 0)
+            | (col("vote_average") > 10)
+        )
+        .count()
+    )
+
+    print(
+        f"\nMOVIES — invalid vote_average: "
+        f"{invalid_count}"
+    )
+
+    return invalid_count > 0
 
 
 def main():
@@ -79,7 +99,6 @@ def main():
         .master("local[*]")
         .getOrCreate()
     )
-
 
     movies = spark.read.parquet(
         f"{BASE_PATH}/movies"
@@ -109,148 +128,149 @@ def main():
         f"{BASE_PATH}/movie_directors"
     )
 
-
     failed = False
 
-    failed |= check_nulls(
+    if check_nulls(
         movies,
         "MOVIES",
         [
             "movie_id",
             "title"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movies,
         "MOVIES",
         [
             "movie_id"
         ]
-    )
-
-
-    invalid_ratings = movies.filter(
-        (col("vote_average") < 0)
-        | (col("vote_average") > 10)
-    ).count()
-
-    print(
-        f"\nMOVIES — invalid vote_average: "
-        f"{invalid_ratings}"
-    )
-
-    if invalid_ratings > 0:
+    ):
         failed = True
 
-    failed |= check_nulls(
+    if check_vote_average(movies):
+        failed = True
+
+    if check_nulls(
         movie_genres,
         "MOVIE GENRES",
         [
             "movie_id",
             "genre_id"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movie_genres,
         "MOVIE GENRES",
         [
             "movie_id",
             "genre_id"
         ]
-    )
+    ):
+        failed = True
 
-    check_movie_ids(
+    if check_movie_ids(
         movie_genres,
         "MOVIE GENRES",
         movies
-    )
+    ):
+        failed = True
 
-    failed |= check_nulls(
+    if check_nulls(
         movie_companies,
         "MOVIE COMPANIES",
         [
             "movie_id",
             "company_id"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movie_companies,
         "MOVIE COMPANIES",
         [
             "movie_id",
             "company_id"
         ]
-    )
+    ):
+        failed = True
 
-    check_movie_ids(
+    if check_movie_ids(
         movie_companies,
         "MOVIE COMPANIES",
         movies
-    )
+    ):
+        failed = True
 
-
-    failed |= check_nulls(
+    if check_nulls(
         movie_countries,
         "MOVIE COUNTRIES",
         [
             "movie_id",
             "country_code"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movie_countries,
         "MOVIE COUNTRIES",
         [
             "movie_id",
             "country_code"
         ]
-    )
+    ):
+        failed = True
 
-    check_movie_ids(
+    if check_movie_ids(
         movie_countries,
         "MOVIE COUNTRIES",
         movies
-    )
+    ):
+        failed = True
 
-
-    failed |= check_nulls(
+    if check_nulls(
         movie_languages,
         "MOVIE LANGUAGES",
         [
             "movie_id",
             "language_code"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movie_languages,
         "MOVIE LANGUAGES",
         [
             "movie_id",
             "language_code"
         ]
-    )
+    ):
+        failed = True
 
-    check_movie_ids(
+    if check_movie_ids(
         movie_languages,
         "MOVIE LANGUAGES",
         movies
-    )
+    ):
+        failed = True
 
-    failed |= check_nulls(
+    if check_nulls(
         movie_actors,
         "MOVIE ACTORS",
         [
             "movie_id",
             "actor_id"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movie_actors,
         "MOVIE ACTORS",
         [
@@ -259,54 +279,51 @@ def main():
             "character",
             "cast_order"
         ]
-    )
+    ):
+        failed = True
 
-    check_movie_ids(
+    if check_movie_ids(
         movie_actors,
         "MOVIE ACTORS",
         movies
-    )
+    ):
+        failed = True
 
-    failed |= check_nulls(
+    if check_nulls(
         movie_directors,
         "MOVIE DIRECTORS",
         [
             "movie_id",
             "director_id"
         ]
-    )
+    ):
+        failed = True
 
-    failed |= check_duplicates(
+    if check_duplicates(
         movie_directors,
         "MOVIE DIRECTORS",
         [
             "movie_id",
             "director_id"
         ]
-    )
+    ):
+        failed = True
 
-    check_movie_ids(
+    if check_movie_ids(
         movie_directors,
         "MOVIE DIRECTORS",
         movies
-    )
-
+    ):
+        failed = True
 
     if failed:
-
-        print(
-            "DATA QUALITY FAILED"
-        )
+        print("\nDATA QUALITY FAILED")
 
         spark.stop()
 
         raise SystemExit(1)
 
-    else:
-
-        print(
-            "DATA QUALITY PASSED"
-        )
+    print("\nDATA QUALITY PASSED")
 
     spark.stop()
 
