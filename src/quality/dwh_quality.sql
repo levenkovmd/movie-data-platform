@@ -179,8 +179,7 @@ SELECT COUNT(*) AS invalid_actor_id
 FROM fact_movie_snapshot f
 LEFT JOIN dim_actor a
     ON f.main_actor_id = a.actor_id
-WHERE f.main_actor_id IS NOT NULL
-  AND a.actor_id IS NULL;
+WHERE f.main_actor_id IS NOT NULL AND a.actor_id IS NULL;
 
 -- Проверяем корректность ссылки на жанр
 -- NULL здесь допустим, поэтому проверяем только заполненные значения
@@ -188,8 +187,7 @@ SELECT COUNT(*) AS invalid_genre_id
 FROM fact_movie_snapshot f
 LEFT JOIN dim_genre g
     ON f.genre_id = g.genre_id
-WHERE f.genre_id IS NOT NULL
-  AND g.genre_id IS NULL;
+WHERE f.genre_id IS NOT NULL AND g.genre_id IS NULL;
 
 
 -- ПОЛНОТА ДАННЫХ В FACT
@@ -229,3 +227,24 @@ SELECT
 FROM fact_movie_snapshot
 GROUP BY snapshot_date
 ORDER BY snapshot_date;
+
+-- Некорректный рейтинг фильма
+SELECT 
+    COUNT(*) AS invalid_vote_average
+FROM fact_movie_snapshot
+WHERE vote_average < 0 OR vote_average > 10;
+
+-- Отрицательное число голосов
+SELECT COUNT(*) AS invalid_vote_count
+FROM fact_movie_snapshot
+WHERE vote_count < 0;
+
+-- Отсутствующий рейтинг
+SELECT COUNT(*) AS null_vote_average
+FROM fact_movie_snapshot
+WHERE vote_average IS NULL;
+
+-- Отсутствующее число голосов
+SELECT COUNT(*) AS null_vote_count
+FROM fact_movie_snapshot
+WHERE vote_count IS NULL;

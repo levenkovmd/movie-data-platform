@@ -41,6 +41,8 @@ movies = spark.read.parquet(
 movies = movies.select(
     "movie_id",
     "popularity",
+    "vote_average",
+    "vote_count",
     "budget",
 )
 
@@ -168,6 +170,8 @@ fact = fact.select(
     "movie_id",
     "title",
     "popularity",
+    "vote_average",
+    "vote_count",
     "budget",
     col("actor_id").alias("main_actor_id"),
     col("actor_name").alias("main_actor_name"),

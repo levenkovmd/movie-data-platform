@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS fact_movie_snapshot (
     movie_id BIGINT NOT NULL,
     title TEXT NOT NULL,
     popularity DOUBLE PRECISION,
+    vote_average DOUBLE PRECISION,
+    vote_count BIGINT,
     budget BIGINT,
     main_actor_id BIGINT,
     main_actor_name TEXT,
