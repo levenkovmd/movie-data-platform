@@ -1,8 +1,10 @@
 import os
+
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, row_number
+from pyspark.sql.functions import col, row_number, current_date
 from pyspark.sql.window import Window
+
 
 load_dotenv()
 
@@ -23,6 +25,7 @@ JDBC_PROPERTIES = {
     "driver": "org.postgresql.Driver",
 }
 
+
 spark = (
     SparkSession.builder
     .appName("Load movie snapshot fact")
@@ -33,6 +36,8 @@ spark = (
     )
     .getOrCreate()
 )
+
+
 
 movies = spark.read.parquet(
     "data/processed/tmdb/movies"
@@ -45,6 +50,7 @@ movies = movies.select(
     "vote_count",
     "budget",
 )
+
 
 dim_movie = spark.read.jdbc(
     url=JDBC_URL,
@@ -68,6 +74,7 @@ dim_genre = spark.read.jdbc(
     properties=JDBC_PROPERTIES,
 )
 
+
 bridge_movie_actor = spark.read.jdbc(
     url=JDBC_URL,
     table="bridge_movie_actor",
@@ -80,11 +87,6 @@ bridge_movie_genre = spark.read.jdbc(
     properties=JDBC_PROPERTIES,
 )
 
-dim_date = spark.read.jdbc(
-    url=JDBC_URL,
-    table="dim_date",
-    properties=JDBC_PROPERTIES,
-)
 
 actor_window = (
     Window
@@ -106,6 +108,7 @@ main_actor = (
         "actor_id",
     )
 )
+
 
 genre_window = (
     Window
@@ -157,13 +160,12 @@ fact = (
     )
 )
 
-snapshot_date = dim_date.select(
-    col("date_id").alias("snapshot_date")
+
+fact = fact.withColumn(
+    "snapshot_date",
+    current_date(),
 )
 
-fact = fact.crossJoin(
-    snapshot_date
-)
 
 fact = fact.select(
     "snapshot_date",
