@@ -1,6 +1,9 @@
 import os
+
+import psycopg
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
+
 
 load_dotenv()
 
@@ -33,34 +36,61 @@ spark = (
     .getOrCreate()
 )
 
+
 movie_actors = spark.read.parquet(
     "data/processed/tmdb/movie_actors"
 )
 
-movie_actors = movie_actors.select(
-    "movie_id",
-    "actor_id",
-    "character",
-    "cast_order",
-).dropDuplicates(
-    ["movie_id", "actor_id", "character", "cast_order"]
+
+movie_actors = (
+    movie_actors
+    .select(
+        "movie_id",
+        "actor_id",
+        "character",
+        "cast_order",
+    )
+    .dropDuplicates(
+        [
+            "movie_id",
+            "actor_id",
+            "character",
+            "cast_order",
+        ]
+    )
 )
 
-dim_movie = spark.read.jdbc(
-    url=JDBC_URL,
-    table="dim_movie",
-    properties=JDBC_PROPERTIES,
-).select(
-    "movie_id"
+
+# Берем только существующие фильмы
+
+dim_movie = (
+    spark.read.jdbc(
+        url=JDBC_URL,
+        table="dim_movie",
+        properties=JDBC_PROPERTIES,
+    )
+    .select(
+        "movie_id"
+    )
 )
 
-dim_actor = spark.read.jdbc(
-    url=JDBC_URL,
-    table="dim_actor",
-    properties=JDBC_PROPERTIES,
-).select(
-    "actor_id"
+
+# Берем только существующих актеров
+
+dim_actor = (
+    spark.read.jdbc(
+        url=JDBC_URL,
+        table="dim_actor",
+        properties=JDBC_PROPERTIES,
+    )
+    .select(
+        "actor_id"
+    )
 )
+
+
+# Убираем связи с фильмами и актерами,
+# которых нет в dimensions
 
 movie_actors = (
     movie_actors
@@ -76,16 +106,67 @@ movie_actors = (
     )
 )
 
+
+relation_count = movie_actors.count()
+
+
+# Сначала сохраняем актуальный набор связей
+# во staging-таблицу
+
 movie_actors.write.jdbc(
     url=JDBC_URL,
-    table="bridge_movie_actor",
-    mode="append",
+    table="stg_bridge_movie_actor",
+    mode="overwrite",
     properties=JDBC_PROPERTIES,
 )
 
+
+# Полностью синхронизируем bridge с текущими данными
+
+with psycopg.connect(
+    host=POSTGRES_HOST,
+    port=POSTGRES_PORT,
+    dbname=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+) as connection:
+
+    with connection.cursor() as cursor:
+
+        cursor.execute(
+            """
+            DELETE FROM bridge_movie_actor;
+            """
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO bridge_movie_actor (
+                movie_id,
+                actor_id,
+                character,
+                cast_order
+            )
+            SELECT
+                movie_id,
+                actor_id,
+                character,
+                cast_order
+            FROM stg_bridge_movie_actor;
+            """
+        )
+
+        cursor.execute(
+            """
+            DROP TABLE stg_bridge_movie_actor;
+            """
+        )
+
+
 print(
     "Movie-actor relations loaded:",
-    movie_actors.count(),
+    relation_count,
 )
+
 
 spark.stop()

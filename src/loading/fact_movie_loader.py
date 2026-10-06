@@ -1,8 +1,11 @@
+import argparse
 import os
+from datetime import date
 
+import psycopg
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, row_number, current_date
+from pyspark.sql.functions import col, lit, row_number
 from pyspark.sql.window import Window
 
 
@@ -26,6 +29,19 @@ JDBC_PROPERTIES = {
 }
 
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument(
+    "--snapshot-date",
+    type=date.fromisoformat,
+    default=date.today(),
+)
+
+args = parser.parse_args()
+
+snapshot_date = args.snapshot_date
+
+
 spark = (
     SparkSession.builder
     .appName("Load movie snapshot fact")
@@ -38,35 +54,39 @@ spark = (
 )
 
 
-
-movies = spark.read.parquet(
-    "data/processed/tmdb/movies"
+movies = (
+    spark.read
+    .parquet("data/processed/tmdb/movies")
+    .select(
+        "movie_id",
+        "popularity",
+        "vote_average",
+        "vote_count",
+        "budget",
+    )
 )
 
-movies = movies.select(
-    "movie_id",
-    "popularity",
-    "vote_average",
-    "vote_count",
-    "budget",
+
+dim_movie = (
+    spark.read.jdbc(
+        url=JDBC_URL,
+        table="dim_movie",
+        properties=JDBC_PROPERTIES,
+    )
+    .select(
+        "movie_id",
+        "title",
+        "original_language",
+    )
 )
 
-
-dim_movie = spark.read.jdbc(
-    url=JDBC_URL,
-    table="dim_movie",
-    properties=JDBC_PROPERTIES,
-).select(
-    "movie_id",
-    "title",
-    "original_language",
-)
 
 dim_actor = spark.read.jdbc(
     url=JDBC_URL,
     table="dim_actor",
     properties=JDBC_PROPERTIES,
 )
+
 
 dim_genre = spark.read.jdbc(
     url=JDBC_URL,
@@ -81,6 +101,7 @@ bridge_movie_actor = spark.read.jdbc(
     properties=JDBC_PROPERTIES,
 )
 
+
 bridge_movie_genre = spark.read.jdbc(
     url=JDBC_URL,
     table="bridge_movie_genre",
@@ -93,6 +114,7 @@ actor_window = (
     .partitionBy("movie_id")
     .orderBy(col("cast_order"))
 )
+
 
 main_actor = (
     bridge_movie_actor
@@ -116,6 +138,7 @@ genre_window = (
     .orderBy(col("genre_id"))
 )
 
+
 main_genre = (
     bridge_movie_genre
     .withColumn(
@@ -130,6 +153,7 @@ main_genre = (
         "genre_id",
     )
 )
+
 
 fact = (
     movies
@@ -163,7 +187,7 @@ fact = (
 
 fact = fact.withColumn(
     "snapshot_date",
-    current_date(),
+    lit(snapshot_date.isoformat()).cast("date"),
 )
 
 
@@ -177,21 +201,87 @@ fact = fact.select(
     "budget",
     col("actor_id").alias("main_actor_id"),
     col("actor_name").alias("main_actor_name"),
-    col("genre_id"),
-    col("genre_name"),
+    "genre_id",
+    "genre_name",
     "original_language",
 )
 
+
+fact_count = fact.count()
+
+
 fact.write.jdbc(
     url=JDBC_URL,
-    table="fact_movie_snapshot",
-    mode="append",
+    table="stg_fact_movie_snapshot",
+    mode="overwrite",
     properties=JDBC_PROPERTIES,
 )
 
+
+with psycopg.connect(
+    host=POSTGRES_HOST,
+    port=POSTGRES_PORT,
+    dbname=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+) as connection:
+
+    with connection.cursor() as cursor:
+
+        cursor.execute(
+            """
+            DELETE FROM fact_movie_snapshot
+            WHERE snapshot_date = %s;
+            """,
+            (snapshot_date,),
+        )
+
+        cursor.execute(
+            """
+            INSERT INTO fact_movie_snapshot (
+                snapshot_date,
+                movie_id,
+                title,
+                popularity,
+                vote_average,
+                vote_count,
+                budget,
+                main_actor_id,
+                main_actor_name,
+                genre_id,
+                genre_name,
+                original_language
+            )
+            SELECT
+                snapshot_date,
+                movie_id,
+                title,
+                popularity,
+                vote_average,
+                vote_count,
+                budget,
+                main_actor_id,
+                main_actor_name,
+                genre_id,
+                genre_name,
+                original_language
+            FROM stg_fact_movie_snapshot
+            WHERE snapshot_date = %s;
+            """,
+            (snapshot_date,),
+        )
+
+        cursor.execute(
+            """
+            DROP TABLE stg_fact_movie_snapshot;
+            """
+        )
+
+
 print(
     "Movie snapshot loaded:",
-    fact.count(),
+    snapshot_date,
+    fact_count,
 )
 
 spark.stop()

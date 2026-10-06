@@ -1,6 +1,9 @@
 import os
+
+import psycopg
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
+
 
 load_dotenv()
 
@@ -21,6 +24,7 @@ JDBC_PROPERTIES = {
     "driver": "org.postgresql.Driver",
 }
 
+
 spark = (
     SparkSession.builder
     .appName("Load actors to DWH")
@@ -32,9 +36,11 @@ spark = (
     .getOrCreate()
 )
 
+
 movie_actors = spark.read.parquet(
     "data/processed/tmdb/movie_actors"
 )
+
 
 actors = (
     movie_actors
@@ -44,16 +50,71 @@ actors = (
         "gender",
         "known_for_department",
     )
-    .dropDuplicates(["actor_id"])
+    .dropDuplicates(
+        ["actor_id"]
+    )
 )
+
+
+actor_count = actors.count()
+
+
+# Загружаем актуальные данные во staging-таблицу
 
 actors.write.jdbc(
     url=JDBC_URL,
-    table="dim_actor",
-    mode="append",
+    table="stg_dim_actor",
+    mode="overwrite",
     properties=JDBC_PROPERTIES,
 )
 
-print("Actors loaded:", actors.count())
+
+# Добавляем новых актеров и обновляем существующих
+
+with psycopg.connect(
+    host=POSTGRES_HOST,
+    port=POSTGRES_PORT,
+    dbname=POSTGRES_DB,
+    user=POSTGRES_USER,
+    password=POSTGRES_PASSWORD,
+) as connection:
+
+    with connection.cursor() as cursor:
+
+        cursor.execute(
+            """
+            INSERT INTO dim_actor (
+                actor_id,
+                actor_name,
+                gender,
+                known_for_department
+            )
+            SELECT
+                actor_id,
+                actor_name,
+                gender,
+                known_for_department
+            FROM stg_dim_actor
+
+            ON CONFLICT (actor_id)
+            DO UPDATE SET
+                actor_name = EXCLUDED.actor_name,
+                gender = EXCLUDED.gender,
+                known_for_department = EXCLUDED.known_for_department;
+            """
+        )
+
+        cursor.execute(
+            """
+            DROP TABLE stg_dim_actor;
+            """
+        )
+
+
+print(
+    "Actors loaded:",
+    actor_count,
+)
+
 
 spark.stop()
