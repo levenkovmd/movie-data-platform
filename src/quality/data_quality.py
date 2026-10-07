@@ -1,8 +1,11 @@
+import argparse
+from datetime import date
+from pathlib import Path
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 
-
-BASE_PATH = "data/processed/tmdb"
+from src.config.settings import PROCESSED_DATA_PATH
 
 
 def check_nulls(df, table_name, columns):
@@ -11,9 +14,11 @@ def check_nulls(df, table_name, columns):
     failed = False
 
     for column in columns:
-        count = df.filter(
-            col(column).isNull()
-        ).count()
+        count = (
+            df
+            .filter(col(column).isNull())
+            .count()
+        )
 
         print(f"{column}: {count}")
 
@@ -54,7 +59,7 @@ def check_movie_ids(df, table_name, movies):
             .select("movie_id")
             .distinct(),
             on="movie_id",
-            how="left_anti"
+            how="left_anti",
         )
     )
 
@@ -67,7 +72,7 @@ def check_movie_ids(df, table_name, movies):
     if count > 0:
         invalid.show(
             100,
-            truncate=False
+            truncate=False,
         )
 
     return count > 0
@@ -91,7 +96,35 @@ def check_vote_average(movies):
     return invalid_count > 0
 
 
-def main():
+def check_vote_count(movies):
+    invalid_count = (
+        movies
+        .filter(
+            col("vote_count") < 0
+        )
+        .count()
+    )
+
+    print(
+        f"\nMOVIES — invalid vote_count: "
+        f"{invalid_count}"
+    )
+
+    return invalid_count > 0
+
+
+def main(snapshot_date: date):
+
+    base_path = (
+        Path(PROCESSED_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+    )
+
+    if not base_path.exists():
+        raise RuntimeError(
+            f"Processed directory not found: {base_path}"
+        )
 
     spark = (
         SparkSession.builder
@@ -101,42 +134,44 @@ def main():
     )
 
     movies = spark.read.parquet(
-        f"{BASE_PATH}/movies"
+        str(base_path / "movies")
     )
 
     movie_genres = spark.read.parquet(
-        f"{BASE_PATH}/movie_genres"
+        str(base_path / "movie_genres")
     )
 
     movie_companies = spark.read.parquet(
-        f"{BASE_PATH}/movie_companies"
+        str(base_path / "movie_companies")
     )
 
     movie_countries = spark.read.parquet(
-        f"{BASE_PATH}/movie_countries"
+        str(base_path / "movie_countries")
     )
 
     movie_languages = spark.read.parquet(
-        f"{BASE_PATH}/movie_languages"
+        str(base_path / "movie_languages")
     )
 
     movie_actors = spark.read.parquet(
-        f"{BASE_PATH}/movie_actors"
+        str(base_path / "movie_actors")
     )
 
     movie_directors = spark.read.parquet(
-        f"{BASE_PATH}/movie_directors"
+        str(base_path / "movie_directors")
     )
 
     failed = False
 
+    # MOVIES
+
     if check_nulls(
         movies,
         "MOVIES",
         [
             "movie_id",
-            "title"
-        ]
+            "title",
+        ],
     ):
         failed = True
 
@@ -144,21 +179,30 @@ def main():
         movies,
         "MOVIES",
         [
-            "movie_id"
-        ]
+            "movie_id",
+        ],
     ):
         failed = True
 
-    if check_vote_average(movies):
+    if check_vote_average(
+        movies
+    ):
         failed = True
+
+    if check_vote_count(
+        movies
+    ):
+        failed = True
+
+    # MOVIE GENRES
 
     if check_nulls(
         movie_genres,
         "MOVIE GENRES",
         [
             "movie_id",
-            "genre_id"
-        ]
+            "genre_id",
+        ],
     ):
         failed = True
 
@@ -167,25 +211,27 @@ def main():
         "MOVIE GENRES",
         [
             "movie_id",
-            "genre_id"
-        ]
+            "genre_id",
+        ],
     ):
         failed = True
 
     if check_movie_ids(
         movie_genres,
         "MOVIE GENRES",
-        movies
+        movies,
     ):
         failed = True
+
+    # MOVIE COMPANIES
 
     if check_nulls(
         movie_companies,
         "MOVIE COMPANIES",
         [
             "movie_id",
-            "company_id"
-        ]
+            "company_id",
+        ],
     ):
         failed = True
 
@@ -194,25 +240,27 @@ def main():
         "MOVIE COMPANIES",
         [
             "movie_id",
-            "company_id"
-        ]
+            "company_id",
+        ],
     ):
         failed = True
 
     if check_movie_ids(
         movie_companies,
         "MOVIE COMPANIES",
-        movies
+        movies,
     ):
         failed = True
+
+    # MOVIE COUNTRIES
 
     if check_nulls(
         movie_countries,
         "MOVIE COUNTRIES",
         [
             "movie_id",
-            "country_code"
-        ]
+            "country_code",
+        ],
     ):
         failed = True
 
@@ -221,25 +269,27 @@ def main():
         "MOVIE COUNTRIES",
         [
             "movie_id",
-            "country_code"
-        ]
+            "country_code",
+        ],
     ):
         failed = True
 
     if check_movie_ids(
         movie_countries,
         "MOVIE COUNTRIES",
-        movies
+        movies,
     ):
         failed = True
+
+    # MOVIE LANGUAGES
 
     if check_nulls(
         movie_languages,
         "MOVIE LANGUAGES",
         [
             "movie_id",
-            "language_code"
-        ]
+            "language_code",
+        ],
     ):
         failed = True
 
@@ -248,25 +298,27 @@ def main():
         "MOVIE LANGUAGES",
         [
             "movie_id",
-            "language_code"
-        ]
+            "language_code",
+        ],
     ):
         failed = True
 
     if check_movie_ids(
         movie_languages,
         "MOVIE LANGUAGES",
-        movies
+        movies,
     ):
         failed = True
+
+    # MOVIE ACTORS
 
     if check_nulls(
         movie_actors,
         "MOVIE ACTORS",
         [
             "movie_id",
-            "actor_id"
-        ]
+            "actor_id",
+        ],
     ):
         failed = True
 
@@ -277,25 +329,27 @@ def main():
             "movie_id",
             "actor_id",
             "character",
-            "cast_order"
-        ]
+            "cast_order",
+        ],
     ):
         failed = True
 
     if check_movie_ids(
         movie_actors,
         "MOVIE ACTORS",
-        movies
+        movies,
     ):
         failed = True
+
+    # MOVIE DIRECTORS
 
     if check_nulls(
         movie_directors,
         "MOVIE DIRECTORS",
         [
             "movie_id",
-            "director_id"
-        ]
+            "director_id",
+        ],
     ):
         failed = True
 
@@ -304,29 +358,48 @@ def main():
         "MOVIE DIRECTORS",
         [
             "movie_id",
-            "director_id"
-        ]
+            "director_id",
+        ],
     ):
         failed = True
 
     if check_movie_ids(
         movie_directors,
         "MOVIE DIRECTORS",
-        movies
+        movies,
     ):
         failed = True
 
     if failed:
-        print("\nDATA QUALITY FAILED")
+        print(
+            f"\nDATA QUALITY FAILED "
+            f"for snapshot {snapshot_date}"
+        )
 
         spark.stop()
 
         raise SystemExit(1)
 
-    print("\nDATA QUALITY PASSED")
+    print(
+        f"\nDATA QUALITY PASSED "
+        f"for snapshot {snapshot_date}"
+    )
 
     spark.stop()
 
 
 if __name__ == "__main__":
-    main()
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    main(
+        snapshot_date=args.snapshot_date
+    )

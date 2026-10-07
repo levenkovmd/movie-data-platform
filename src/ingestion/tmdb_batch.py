@@ -1,30 +1,33 @@
+import argparse
 import json
 import time
+from datetime import date, datetime
 from pathlib import Path
-from datetime import datetime
+
 import requests
+
 from src.config.settings import (
     TMDB_API_KEY,
     TMDB_BASE_URL,
-    PROXIES
+    PROXIES,
+    RAW_DATA_PATH,
 )
 
-RAW_PATH = Path("data/raw/tmdb/movies")
 
-def get_popular_movies(page: int):
+def get_popular_movies(page: int) -> dict:
 
     url = f"{TMDB_BASE_URL}/movie/popular"
 
     params = {
         "api_key": TMDB_API_KEY,
-        "page": page
+        "page": page,
     }
 
     response = requests.get(
         url,
         params=params,
         proxies=PROXIES,
-        timeout=30
+        timeout=30,
     )
 
     response.raise_for_status()
@@ -32,29 +35,40 @@ def get_popular_movies(page: int):
     return response.json()
 
 
-def save_raw_page(data: dict, page: int):
+def save_raw_page(
+    data: dict,
+    page: int,
+    snapshot_date: date,
+):
 
-    RAW_PATH.mkdir(
+    raw_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "movies"
+    )
+
+    raw_path.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     filename = (
-        RAW_PATH /
-        f"movies_page_{page:03d}.json"
+        raw_path
+        / f"movies_page_{page:03d}.json"
     )
 
     with open(
         filename,
         "w",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
 
         json.dump(
             data,
             file,
             ensure_ascii=False,
-            indent=4
+            indent=4,
         )
 
     print(
@@ -63,13 +77,16 @@ def save_raw_page(data: dict, page: int):
 
 
 def run_ingestion(
-    start_page=1,
-    end_page=300
+    snapshot_date: date,
+    start_page: int = 1,
+    end_page: int = 300,
 ):
+
+    failed_pages = []
 
     for page in range(
         start_page,
-        end_page + 1
+        end_page + 1,
     ):
 
         print(
@@ -82,13 +99,13 @@ def run_ingestion(
 
             save_raw_page(
                 data,
-                page
+                page,
+                snapshot_date,
             )
 
             print(
                 f"Movies loaded: {len(data['results'])}"
             )
-
 
         except Exception as e:
 
@@ -96,13 +113,30 @@ def run_ingestion(
                 f"ERROR page {page}: {e}"
             )
 
+            failed_pages.append(page)
 
         time.sleep(1)
+
+    if failed_pages:
+        raise RuntimeError(
+            f"Failed pages: {failed_pages}"
+        )
 
 
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
     run_ingestion(
+        snapshot_date=args.snapshot_date,
         start_page=1,
-        end_page=300
+        end_page=300,
     )

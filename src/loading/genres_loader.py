@@ -1,6 +1,14 @@
+import argparse
 import os
+from datetime import date
+from pathlib import Path
+
+import psycopg
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
+
+from src.config.settings import PROCESSED_DATA_PATH
+
 
 load_dotenv()
 
@@ -21,37 +29,114 @@ JDBC_PROPERTIES = {
     "driver": "org.postgresql.Driver",
 }
 
-spark = (
-    SparkSession.builder
-    .appName("Load genres to DWH")
-    .master("local[*]")
-    .config(
-        "spark.jars.packages",
-        "org.postgresql:postgresql:42.7.8",
+
+def main(snapshot_date: date):
+
+    movie_genres_path = (
+        Path(PROCESSED_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "movie_genres"
     )
-    .getOrCreate()
-)
 
-movie_genres = spark.read.parquet(
-    "data/processed/tmdb/movie_genres"
-)
+    if not movie_genres_path.exists():
+        raise RuntimeError(
+            f"Movie genres directory not found: {movie_genres_path}"
+        )
 
-genres = movie_genres.select(
-    "genre_id",
-    "genre_name",
-).dropDuplicates(
-    ["genre_id"]
-)
+    spark = (
+        SparkSession.builder
+        .appName("Load genres to DWH")
+        .master("local[*]")
+        .config(
+            "spark.jars.packages",
+            "org.postgresql:postgresql:42.7.8",
+        )
+        .getOrCreate()
+    )
 
-genres.write.jdbc(
-    url=JDBC_URL,
-    table="dim_genre",
-    mode="append",
-    properties=JDBC_PROPERTIES,
-)
+    movie_genres = spark.read.parquet(
+        str(movie_genres_path)
+    )
+
+    genres = (
+        movie_genres
+        .select(
+            "genre_id",
+            "genre_name",
+        )
+        .dropDuplicates(
+            ["genre_id"]
+        )
+    )
+
+    genre_count = genres.count()
+
+    # Загружаем актуальные данные во staging-таблицу
+
+    genres.write.jdbc(
+        url=JDBC_URL,
+        table="stg_dim_genre",
+        mode="overwrite",
+        properties=JDBC_PROPERTIES,
+    )
+
+    # Добавляем новые жанры и обновляем существующие
+
+    with psycopg.connect(
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        dbname=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+    ) as connection:
+
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                INSERT INTO dim_genre (
+                    genre_id,
+                    genre_name
+                )
+                SELECT
+                    genre_id,
+                    genre_name
+                FROM stg_dim_genre
+
+                ON CONFLICT (genre_id)
+                DO UPDATE SET
+                    genre_name = EXCLUDED.genre_name;
+                """
+            )
+
+            cursor.execute(
+                """
+                DROP TABLE stg_dim_genre;
+                """
+            )
+
+    print(
+        "Genres loaded:",
+        snapshot_date,
+        genre_count,
+    )
+
+    spark.stop()
 
 
-print("Genres loaded:", genres.count())
+if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser()
 
-spark.stop()
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    main(
+        snapshot_date=args.snapshot_date
+    )

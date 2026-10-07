@@ -1,15 +1,10 @@
+import argparse
 import os
 from datetime import date
+
+import psycopg
 from dotenv import load_dotenv
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import (
-    dayofmonth,
-    dayofweek,
-    lit,
-    month,
-    quarter,
-    year,
-)
+
 
 load_dotenv()
 
@@ -19,51 +14,67 @@ POSTGRES_DB = os.getenv("POSTGRES_DB")
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
-JDBC_URL = (
-    f"jdbc:postgresql://{POSTGRES_HOST}:"
-    f"{POSTGRES_PORT}/{POSTGRES_DB}"
-)
 
-JDBC_PROPERTIES = {
-    "user": POSTGRES_USER,
-    "password": POSTGRES_PASSWORD,
-    "driver": "org.postgresql.Driver",
-}
+def main(snapshot_date: date):
 
-SNAPSHOT_DATE = date.today()
+    with psycopg.connect(
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        dbname=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+    ) as connection:
 
-spark = (
-    SparkSession.builder
-    .appName("Load date to DWH")
-    .master("local[*]")
-    .config(
-        "spark.jars.packages",
-        "org.postgresql:postgresql:42.7.8",
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                INSERT INTO dim_date (
+                    date_id,
+                    year,
+                    month,
+                    quarter,
+                    day,
+                    day_of_week
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+
+                ON CONFLICT (date_id)
+                DO UPDATE SET
+                    year = EXCLUDED.year,
+                    month = EXCLUDED.month,
+                    quarter = EXCLUDED.quarter,
+                    day = EXCLUDED.day,
+                    day_of_week = EXCLUDED.day_of_week;
+                """,
+                (
+                    snapshot_date,
+                    snapshot_date.year,
+                    snapshot_date.month,
+                    (snapshot_date.month - 1) // 3 + 1,
+                    snapshot_date.day,
+                    snapshot_date.isoweekday(),
+                ),
+            )
+
+    print(
+        "Date loaded:",
+        snapshot_date,
     )
-    .getOrCreate()
-)
 
-snapshot = spark.createDataFrame(
-    [(SNAPSHOT_DATE,)],
-    ["date_id"],
-)
 
-snapshot = (
-    snapshot
-    .withColumn("year", year("date_id"))
-    .withColumn("month", month("date_id"))
-    .withColumn("quarter", quarter("date_id"))
-    .withColumn("day", dayofmonth("date_id"))
-    .withColumn("day_of_week", dayofweek("date_id"))
-)
+if __name__ == "__main__":
 
-snapshot.write.jdbc(
-    url=JDBC_URL,
-    table="dim_date",
-    mode="append",
-    properties=JDBC_PROPERTIES,
-)
+    parser = argparse.ArgumentParser()
 
-print("Snapshot date loaded:", SNAPSHOT_DATE)
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
 
-spark.stop()
+    args = parser.parse_args()
+
+    main(
+        snapshot_date=args.snapshot_date
+    )

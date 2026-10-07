@@ -1,6 +1,14 @@
+import argparse
 import os
+from datetime import date
+from pathlib import Path
+
+import psycopg
 from dotenv import load_dotenv
 from pyspark.sql import SparkSession
+
+from src.config.settings import PROCESSED_DATA_PATH
+
 
 load_dotenv()
 
@@ -21,39 +29,122 @@ JDBC_PROPERTIES = {
     "driver": "org.postgresql.Driver",
 }
 
-spark = (
-    SparkSession.builder
-    .appName("Load actors to DWH")
-    .master("local[*]")
-    .config(
-        "spark.jars.packages",
-        "org.postgresql:postgresql:42.7.8",
+
+def main(snapshot_date: date):
+
+    movie_actors_path = (
+        Path(PROCESSED_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "movie_actors"
     )
-    .getOrCreate()
-)
 
-movie_actors = spark.read.parquet(
-    "data/processed/tmdb/movie_actors"
-)
+    if not movie_actors_path.exists():
+        raise RuntimeError(
+            f"Movie actors directory not found: {movie_actors_path}"
+        )
 
-actors = (
-    movie_actors
-    .select(
-        "actor_id",
-        "actor_name",
-        "gender",
-        "known_for_department",
+    spark = (
+        SparkSession.builder
+        .appName("Load actors to DWH")
+        .master("local[*]")
+        .config(
+            "spark.jars.packages",
+            "org.postgresql:postgresql:42.7.8",
+        )
+        .getOrCreate()
     )
-    .dropDuplicates(["actor_id"])
-)
 
-actors.write.jdbc(
-    url=JDBC_URL,
-    table="dim_actor",
-    mode="append",
-    properties=JDBC_PROPERTIES,
-)
+    movie_actors = spark.read.parquet(
+        str(movie_actors_path)
+    )
 
-print("Actors loaded:", actors.count())
+    actors = (
+        movie_actors
+        .select(
+            "actor_id",
+            "actor_name",
+            "gender",
+            "known_for_department",
+        )
+        .dropDuplicates(
+            ["actor_id"]
+        )
+    )
 
-spark.stop()
+    actor_count = actors.count()
+
+    # Загружаем актуальные данные во staging-таблицу
+
+    actors.write.jdbc(
+        url=JDBC_URL,
+        table="stg_dim_actor",
+        mode="overwrite",
+        properties=JDBC_PROPERTIES,
+    )
+
+    # Добавляем новых актеров и обновляем существующих
+
+    with psycopg.connect(
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        dbname=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+    ) as connection:
+
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                INSERT INTO dim_actor (
+                    actor_id,
+                    actor_name,
+                    gender,
+                    known_for_department
+                )
+                SELECT
+                    actor_id,
+                    actor_name,
+                    gender,
+                    known_for_department
+                FROM stg_dim_actor
+
+                ON CONFLICT (actor_id)
+                DO UPDATE SET
+                    actor_name = EXCLUDED.actor_name,
+                    gender = EXCLUDED.gender,
+                    known_for_department = EXCLUDED.known_for_department;
+                """
+            )
+
+            cursor.execute(
+                """
+                DROP TABLE stg_dim_actor;
+                """
+            )
+
+    print(
+        "Actors loaded:",
+        snapshot_date,
+        actor_count,
+    )
+
+    spark.stop()
+
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    main(
+        snapshot_date=args.snapshot_date
+    )

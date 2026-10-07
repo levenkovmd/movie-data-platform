@@ -1,24 +1,34 @@
+import argparse
 import json
 import time
+from datetime import date
 from pathlib import Path
+
 import requests
+
 from src.config.settings import (
     TMDB_API_KEY,
     TMDB_BASE_URL,
-    PROXIES
+    PROXIES,
+    RAW_DATA_PATH,
 )
 
-MOVIES_PATH = Path("data/raw/tmdb/movies")
-CREDITS_PATH = Path("data/raw/tmdb/credits")
 
+def get_movie_ids(snapshot_date: date):
+    movies_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "movies"
+    )
 
-def get_movie_ids():
     movie_ids = set()
-    for file in MOVIES_PATH.glob("movies_page_*.json"):
+
+    for file in movies_path.glob("movies_page_*.json"):
 
         with open(
             file,
-            encoding="utf-8"
+            encoding="utf-8",
         ) as f:
 
             data = json.load(f)
@@ -29,21 +39,21 @@ def get_movie_ids():
     return movie_ids
 
 
-def get_movie_credits(movie_id):
+def get_movie_credits(movie_id: int):
 
     url = (
         f"{TMDB_BASE_URL}/movie/{movie_id}/credits"
     )
 
     params = {
-        "api_key": TMDB_API_KEY
+        "api_key": TMDB_API_KEY,
     }
 
     response = requests.get(
         url,
         params=params,
         proxies=PROXIES,
-        timeout=30
+        timeout=30,
     )
 
     response.raise_for_status()
@@ -51,36 +61,61 @@ def get_movie_credits(movie_id):
     return response.json()
 
 
-def save_credits(data):
+def save_credits(
+    data: dict,
+    snapshot_date: date,
+):
 
-    CREDITS_PATH.mkdir(
+    credits_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "credits"
+    )
+
+    credits_path.mkdir(
         parents=True,
-        exist_ok=True
+        exist_ok=True,
     )
 
     movie_id = data["id"]
 
     file_path = (
-        CREDITS_PATH /
-        f"movie_{movie_id}.json"
+        credits_path
+        / f"movie_{movie_id}.json"
     )
 
     with open(
         file_path,
         "w",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as f:
 
         json.dump(
             data,
             f,
             ensure_ascii=False,
-            indent=4
+            indent=4,
         )
 
 
-def run_ingestion():
-    movie_ids = get_movie_ids()
+def run_ingestion(snapshot_date: date):
+
+    movie_ids = get_movie_ids(
+        snapshot_date
+    )
+
+    if not movie_ids:
+        raise RuntimeError(
+            f"No movies found for snapshot {snapshot_date}"
+        )
+
+    credits_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "credits"
+    )
 
     print(
         f"Found movies: {len(movie_ids)}"
@@ -88,23 +123,33 @@ def run_ingestion():
 
     saved = 0
     skipped = 0
-    errors = 0
+    failed_movie_ids = []
 
-
-    for index, movie_id in enumerate(movie_ids, 1):
+    for index, movie_id in enumerate(
+        sorted(movie_ids),
+        1,
+    ):
 
         file_path = (
-            CREDITS_PATH /
-            f"movie_{movie_id}.json"
+            credits_path
+            / f"movie_{movie_id}.json"
         )
-        
+
         if file_path.exists():
             skipped += 1
             continue
 
         try:
-            data = get_movie_credits(movie_id)
-            save_credits(data)
+
+            data = get_movie_credits(
+                movie_id
+            )
+
+            save_credits(
+                data,
+                snapshot_date,
+            )
+
             saved += 1
 
             print(
@@ -112,20 +157,44 @@ def run_ingestion():
                 f"saved {movie_id}"
             )
 
-
         except Exception as e:
-            errors += 1
+
+            failed_movie_ids.append(
+                movie_id
+            )
+
             print(
                 f"ERROR {movie_id}: {e}"
             )
+
         time.sleep(0.3)
 
     print("\nFinished")
     print(f"Saved: {saved}")
     print(f"Skipped: {skipped}")
-    print(f"Errors: {errors}")
+    print(
+        f"Errors: {len(failed_movie_ids)}"
+    )
+
+    if failed_movie_ids:
+        raise RuntimeError(
+            "Failed movie IDs: "
+            f"{failed_movie_ids}"
+        )
 
 
 if __name__ == "__main__":
 
-    run_ingestion()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    run_ingestion(
+        snapshot_date=args.snapshot_date
+    )
