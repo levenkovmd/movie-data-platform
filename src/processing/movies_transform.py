@@ -1,12 +1,41 @@
+import argparse
+from datetime import date
+from pathlib import Path
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, explode
 
+from src.config.settings import (
+    RAW_DATA_PATH,
+    PROCESSED_DATA_PATH,
+)
 
-DETAILS_PATH = "data/raw/tmdb/details"
-PROCESSED_PATH = "data/processed/tmdb"
 
+def main(snapshot_date: date):
 
-def main():
+    details_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "details"
+    )
+
+    processed_path = (
+        Path(PROCESSED_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+    )
+
+    if not details_path.exists():
+        raise RuntimeError(
+            f"Details directory not found: {details_path}"
+        )
+
+    if not list(details_path.glob("movie_*.json")):
+        raise RuntimeError(
+            f"No detail files found for snapshot {snapshot_date}"
+        )
+
     spark = (
         SparkSession.builder
         .appName("TMDB Movies Transform")
@@ -17,7 +46,7 @@ def main():
     details = (
         spark.read
         .option("multiLine", True)
-        .json(DETAILS_PATH)
+        .json(str(details_path))
     )
 
     print("SOURCE SCHEMA")
@@ -42,35 +71,35 @@ def main():
         col("poster_path"),
         col("backdrop_path"),
         col("adult"),
-        col("video")
+        col("video"),
     )
 
     movies.write.mode("overwrite").parquet(
-        f"{PROCESSED_PATH}/movies"
+        str(processed_path / "movies")
     )
 
     movie_genres = (
         details
         .select(
             col("id").alias("movie_id"),
-            explode("genres").alias("genre")
+            explode("genres").alias("genre"),
         )
         .select(
             col("movie_id"),
             col("genre.id").alias("genre_id"),
-            col("genre.name").alias("genre_name")
+            col("genre.name").alias("genre_name"),
         )
     )
 
     movie_genres.write.mode("overwrite").parquet(
-        f"{PROCESSED_PATH}/movie_genres"
+        str(processed_path / "movie_genres")
     )
 
     movie_companies = (
         details
         .select(
             col("id").alias("movie_id"),
-            explode("production_companies").alias("company")
+            explode("production_companies").alias("company"),
         )
         .select(
             col("movie_id"),
@@ -78,12 +107,15 @@ def main():
             col("company.name").alias("company_name"),
             col("company.origin_country").alias(
                 "origin_country"
-            )
+            ),
+        )
+        .dropDuplicates(
+            ["movie_id", "company_id"]
         )
     )
 
     movie_companies.write.mode("overwrite").parquet(
-        f"{PROCESSED_PATH}/movie_companies"
+        str(processed_path / "movie_companies")
     )
 
     movie_countries = (
@@ -92,7 +124,7 @@ def main():
             col("id").alias("movie_id"),
             explode("production_countries").alias(
                 "country"
-            )
+            ),
         )
         .select(
             col("movie_id"),
@@ -101,12 +133,12 @@ def main():
             ),
             col("country.name").alias(
                 "country_name"
-            )
+            ),
         )
     )
 
     movie_countries.write.mode("overwrite").parquet(
-        f"{PROCESSED_PATH}/movie_countries"
+        str(processed_path / "movie_countries")
     )
 
     movie_languages = (
@@ -115,7 +147,7 @@ def main():
             col("id").alias("movie_id"),
             explode("spoken_languages").alias(
                 "language"
-            )
+            ),
         )
         .select(
             col("movie_id"),
@@ -127,16 +159,16 @@ def main():
             ),
             col("language.english_name").alias(
                 "english_name"
-            )
+            ),
         )
     )
 
     movie_languages.write.mode("overwrite").parquet(
-        f"{PROCESSED_PATH}/movie_languages"
+        str(processed_path / "movie_languages")
     )
 
-
     print("\nTRANSFORMATION FINISHED")
+    print(f"Snapshot date: {snapshot_date}")
 
     print("\nMovies:")
     movies.show(5, truncate=False)
@@ -153,9 +185,21 @@ def main():
     print("\nMovie languages:")
     movie_languages.show(10, truncate=False)
 
-
     spark.stop()
 
 
 if __name__ == "__main__":
-    main()
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    main(
+        snapshot_date=args.snapshot_date
+    )

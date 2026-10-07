@@ -15,61 +15,66 @@ POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 
-parser = argparse.ArgumentParser()
+def main(snapshot_date: date):
 
-parser.add_argument(
-    "--snapshot-date",
-    type=date.fromisoformat,
-    default=date.today(),
-)
+    with psycopg.connect(
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        dbname=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+    ) as connection:
 
-args = parser.parse_args()
+        with connection.cursor() as cursor:
 
-snapshot_date = args.snapshot_date
+            cursor.execute(
+                """
+                INSERT INTO dim_date (
+                    date_id,
+                    year,
+                    month,
+                    quarter,
+                    day,
+                    day_of_week
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
 
-
-with psycopg.connect(
-    host=POSTGRES_HOST,
-    port=POSTGRES_PORT,
-    dbname=POSTGRES_DB,
-    user=POSTGRES_USER,
-    password=POSTGRES_PASSWORD,
-) as connection:
-
-    with connection.cursor() as cursor:
-
-        cursor.execute(
-            """
-            INSERT INTO dim_date (
-                date_id,
-                year,
-                month,
-                quarter,
-                day,
-                day_of_week
+                ON CONFLICT (date_id)
+                DO UPDATE SET
+                    year = EXCLUDED.year,
+                    month = EXCLUDED.month,
+                    quarter = EXCLUDED.quarter,
+                    day = EXCLUDED.day,
+                    day_of_week = EXCLUDED.day_of_week;
+                """,
+                (
+                    snapshot_date,
+                    snapshot_date.year,
+                    snapshot_date.month,
+                    (snapshot_date.month - 1) // 3 + 1,
+                    snapshot_date.day,
+                    snapshot_date.isoweekday(),
+                ),
             )
-            VALUES (%s, %s, %s, %s, %s, %s)
 
-            ON CONFLICT (date_id)
-            DO UPDATE SET
-                year = EXCLUDED.year,
-                month = EXCLUDED.month,
-                quarter = EXCLUDED.quarter,
-                day = EXCLUDED.day,
-                day_of_week = EXCLUDED.day_of_week;
-            """,
-            (
-                snapshot_date,
-                snapshot_date.year,
-                snapshot_date.month,
-                (snapshot_date.month - 1) // 3 + 1,
-                snapshot_date.day,
-                snapshot_date.isoweekday(),
-            ),
-        )
+    print(
+        "Date loaded:",
+        snapshot_date,
+    )
 
 
-print(
-    "Date loaded:",
-    snapshot_date,
-)
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    main(
+        snapshot_date=args.snapshot_date
+    )

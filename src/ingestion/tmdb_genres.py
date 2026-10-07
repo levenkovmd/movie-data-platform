@@ -1,26 +1,31 @@
+import argparse
 import json
+from datetime import date
 from pathlib import Path
+
 import requests
+
 from src.config.settings import (
     TMDB_API_KEY,
     TMDB_BASE_URL,
-    PROXIES
+    PROXIES,
+    RAW_DATA_PATH,
 )
 
-GENRES_PATH = Path("data/raw/tmdb/genres")
 
 def get_genres():
+
     url = f"{TMDB_BASE_URL}/genre/movie/list"
-    
+
     params = {
-        "api_key": TMDB_API_KEY
+        "api_key": TMDB_API_KEY,
     }
 
     response = requests.get(
         url,
         params=params,
         proxies=PROXIES,
-        timeout=30
+        timeout=30,
     )
 
     response.raise_for_status()
@@ -28,29 +33,68 @@ def get_genres():
     return response.json()
 
 
-def save_genres(data):
+def save_genres(
+    data: dict,
+    snapshot_date: date,
+):
 
-    GENRES_PATH.mkdir(
-        parents=True,
-        exist_ok=True
+    genres_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "genres"
     )
 
-    file = GENRES_PATH / "genres.json"
+    genres_path.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    file_path = (
+        genres_path
+        / "genres.json"
+    )
 
     with open(
-        file,
+        file_path,
         "w",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as f:
 
         json.dump(
             data,
             f,
             ensure_ascii=False,
-            indent=4
+            indent=4,
         )
+
+    print(
+        f"Genres saved: {file_path}"
+    )
+
+
+def run_ingestion(snapshot_date: date):
+
+    genres = get_genres()
+
+    save_genres(
+        genres,
+        snapshot_date,
+    )
 
 
 if __name__ == "__main__":
-    genres = get_genres()
-    save_genres(genres)
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--snapshot-date",
+        type=date.fromisoformat,
+        default=date.today(),
+    )
+
+    args = parser.parse_args()
+
+    run_ingestion(
+        snapshot_date=args.snapshot_date
+    )
