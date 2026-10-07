@@ -35,11 +35,10 @@ def get_popular_movies(page: int) -> dict:
     return response.json()
 
 
-def save_raw_page(
-    data: dict,
+def get_page_path(
     page: int,
     snapshot_date: date,
-):
+) -> Path:
 
     raw_path = (
         Path(RAW_DATA_PATH)
@@ -53,10 +52,16 @@ def save_raw_page(
         exist_ok=True,
     )
 
-    filename = (
+    return (
         raw_path
         / f"movies_page_{page:03d}.json"
     )
+
+
+def save_raw_page(
+    data: dict,
+    filename: Path,
+):
 
     with open(
         filename,
@@ -84,10 +89,28 @@ def run_ingestion(
 
     failed_pages = []
 
+    saved = 0
+    skipped = 0
+
     for page in range(
         start_page,
         end_page + 1,
     ):
+
+        filename = get_page_path(
+            page,
+            snapshot_date,
+        )
+
+        if filename.exists():
+
+            print(
+                f"Page {page} already exists - skipped"
+            )
+
+            skipped += 1
+
+            continue
 
         print(
             f"Loading page {page}"
@@ -95,16 +118,20 @@ def run_ingestion(
 
         try:
 
-            data = get_popular_movies(page)
+            data = get_popular_movies(
+                page
+            )
 
             save_raw_page(
                 data,
-                page,
-                snapshot_date,
+                filename,
             )
 
+            saved += 1
+
             print(
-                f"Movies loaded: {len(data['results'])}"
+                f"Movies loaded: "
+                f"{len(data['results'])}"
             )
 
         except Exception as e:
@@ -113,11 +140,21 @@ def run_ingestion(
                 f"ERROR page {page}: {e}"
             )
 
-            failed_pages.append(page)
+            failed_pages.append(
+                page
+            )
 
         time.sleep(1)
 
+    print("\nFinished")
+    print(f"Saved: {saved}")
+    print(f"Skipped: {skipped}")
+    print(
+        f"Errors: {len(failed_pages)}"
+    )
+
     if failed_pages:
+
         raise RuntimeError(
             f"Failed pages: {failed_pages}"
         )
