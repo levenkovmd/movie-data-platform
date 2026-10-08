@@ -8,12 +8,17 @@ from pyspark.sql.functions import col
 from src.config.settings import PROCESSED_DATA_PATH
 
 
+TARGET_MOVIES_COUNT = 6000
+
+
 def check_nulls(df, table_name, columns):
+
     print(f"\n{table_name} — NULL checks")
 
     failed = False
 
     for column in columns:
+
         count = (
             df
             .filter(col(column).isNull())
@@ -28,8 +33,15 @@ def check_nulls(df, table_name, columns):
     return failed
 
 
-def check_duplicates(df, table_name, columns):
-    print(f"\n{table_name} — duplicate checks")
+def check_duplicates(
+    df,
+    table_name,
+    columns,
+):
+
+    print(
+        f"\n{table_name} — duplicate checks"
+    )
 
     duplicates = (
         df
@@ -47,8 +59,15 @@ def check_duplicates(df, table_name, columns):
     return count > 0
 
 
-def check_movie_ids(df, table_name, movies):
-    print(f"\n{table_name} — movie_id integrity")
+def check_movie_ids(
+    df,
+    table_name,
+    movies,
+):
+
+    print(
+        f"\n{table_name} — movie_id integrity"
+    )
 
     invalid = (
         df
@@ -66,10 +85,12 @@ def check_movie_ids(df, table_name, movies):
     count = invalid.count()
 
     print(
-        f"movie_id отсутствует в movies: {count}"
+        f"movie_id отсутствует в movies: "
+        f"{count}"
     )
 
     if count > 0:
+
         invalid.show(
             100,
             truncate=False,
@@ -78,7 +99,10 @@ def check_movie_ids(df, table_name, movies):
     return count > 0
 
 
-def check_vote_average(movies):
+def check_vote_average(
+    movies,
+):
+
     invalid_count = (
         movies
         .filter(
@@ -96,7 +120,10 @@ def check_vote_average(movies):
     return invalid_count > 0
 
 
-def check_vote_count(movies):
+def check_vote_count(
+    movies,
+):
+
     invalid_count = (
         movies
         .filter(
@@ -113,7 +140,31 @@ def check_vote_count(movies):
     return invalid_count > 0
 
 
-def main(snapshot_date: date):
+def check_movies_count(
+    movies,
+):
+
+    actual_count = movies.count()
+
+    print(
+        f"\nMOVIES — row count: "
+        f"{actual_count}"
+    )
+
+    print(
+        f"MOVIES — expected row count: "
+        f"{TARGET_MOVIES_COUNT}"
+    )
+
+    return (
+        actual_count
+        != TARGET_MOVIES_COUNT
+    )
+
+
+def main(
+    snapshot_date: date,
+):
 
     base_path = (
         Path(PROCESSED_DATA_PATH)
@@ -122,8 +173,10 @@ def main(snapshot_date: date):
     )
 
     if not base_path.exists():
+
         raise RuntimeError(
-            f"Processed directory not found: {base_path}"
+            f"Processed directory not found: "
+            f"{base_path}"
         )
 
     spark = (
@@ -134,36 +187,62 @@ def main(snapshot_date: date):
     )
 
     movies = spark.read.parquet(
-        str(base_path / "movies")
+        str(
+            base_path
+            / "movies"
+        )
     )
 
     movie_genres = spark.read.parquet(
-        str(base_path / "movie_genres")
+        str(
+            base_path
+            / "movie_genres"
+        )
     )
 
     movie_companies = spark.read.parquet(
-        str(base_path / "movie_companies")
+        str(
+            base_path
+            / "movie_companies"
+        )
     )
 
     movie_countries = spark.read.parquet(
-        str(base_path / "movie_countries")
+        str(
+            base_path
+            / "movie_countries"
+        )
     )
 
     movie_languages = spark.read.parquet(
-        str(base_path / "movie_languages")
+        str(
+            base_path
+            / "movie_languages"
+        )
     )
 
     movie_actors = spark.read.parquet(
-        str(base_path / "movie_actors")
+        str(
+            base_path
+            / "movie_actors"
+        )
     )
 
     movie_directors = spark.read.parquet(
-        str(base_path / "movie_directors")
+        str(
+            base_path
+            / "movie_directors"
+        )
     )
 
     failed = False
 
     # MOVIES
+
+    if check_movies_count(
+        movies
+    ):
+        failed = True
 
     if check_nulls(
         movies,
@@ -371,9 +450,11 @@ def main(snapshot_date: date):
         failed = True
 
     if failed:
+
         print(
             f"\nDATA QUALITY FAILED "
-            f"for snapshot {snapshot_date}"
+            f"for snapshot "
+            f"{snapshot_date}"
         )
 
         spark.stop()
@@ -382,7 +463,8 @@ def main(snapshot_date: date):
 
     print(
         f"\nDATA QUALITY PASSED "
-        f"for snapshot {snapshot_date}"
+        f"for snapshot "
+        f"{snapshot_date}"
     )
 
     spark.stop()

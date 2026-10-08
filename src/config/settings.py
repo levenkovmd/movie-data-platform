@@ -18,3 +18,4 @@ PROXIES = {
 
 RAW_DATA_PATH = "data/raw"
 PROCESSED_DATA_PATH = "data/processed"
+TARGET_MOVIES_COUNT = 6000

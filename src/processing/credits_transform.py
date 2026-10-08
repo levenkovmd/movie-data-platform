@@ -1,4 +1,5 @@
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 
@@ -11,7 +12,49 @@ from src.config.settings import (
 )
 
 
-def main(snapshot_date: date):
+def load_movie_ids(
+    snapshot_date: date,
+) -> list[int]:
+
+    manifest_path = (
+        Path(RAW_DATA_PATH)
+        / "tmdb"
+        / snapshot_date.isoformat()
+        / "movie_ids.json"
+    )
+
+    if not manifest_path.exists():
+        raise RuntimeError(
+            f"Manifest not found: {manifest_path}"
+        )
+
+    with open(
+        manifest_path,
+        encoding="utf-8",
+    ) as f:
+        movie_ids = json.load(f)
+
+    if not isinstance(movie_ids, list):
+        raise RuntimeError(
+            f"Invalid manifest: {manifest_path}"
+        )
+
+    if not movie_ids:
+        raise RuntimeError(
+            f"Manifest is empty: {manifest_path}"
+        )
+
+    if len(movie_ids) != len(set(movie_ids)):
+        raise RuntimeError(
+            "Manifest contains duplicate movie IDs"
+        )
+
+    return movie_ids
+
+
+def main(
+    snapshot_date: date,
+):
 
     credits_path = (
         Path(RAW_DATA_PATH)
@@ -31,10 +74,21 @@ def main(snapshot_date: date):
             f"Credits directory not found: {credits_path}"
         )
 
-    if not list(credits_path.glob("movie_*.json")):
+    if not list(
+        credits_path.glob("movie_*.json")
+    ):
         raise RuntimeError(
-            f"No credits files found for snapshot {snapshot_date}"
+            f"No credits files found for snapshot "
+            f"{snapshot_date}"
         )
+
+    movie_ids = load_movie_ids(
+        snapshot_date
+    )
+
+    print(
+        f"Movies in manifest: {len(movie_ids)}"
+    )
 
     spark = (
         SparkSession.builder
@@ -51,6 +105,32 @@ def main(snapshot_date: date):
 
     print("SOURCE SCHEMA")
     credits.printSchema()
+
+    manifest = spark.createDataFrame(
+        [
+            (movie_id,)
+            for movie_id in movie_ids
+        ],
+        ["movie_id"],
+    )
+
+    credits = (
+        credits
+        .join(
+            manifest,
+            credits["id"]
+            == manifest["movie_id"],
+            "inner",
+        )
+        .drop(
+            manifest["movie_id"]
+        )
+    )
+
+    print(
+        "Credits after manifest filter:",
+        credits.count(),
+    )
 
     movie_actors = (
         credits
@@ -71,8 +151,13 @@ def main(snapshot_date: date):
         )
     )
 
-    movie_actors.write.mode("overwrite").parquet(
-        str(processed_path / "movie_actors")
+    movie_actors.write.mode(
+        "overwrite"
+    ).parquet(
+        str(
+            processed_path
+            / "movie_actors"
+        )
     )
 
     movie_directors = (
@@ -82,31 +167,53 @@ def main(snapshot_date: date):
             explode("crew").alias("crew_member"),
         )
         .filter(
-            lower(col("crew_member.job")) == "director"
+            lower(
+                col("crew_member.job")
+            )
+            == "director"
         )
         .select(
             col("movie_id"),
-            col("crew_member.id").alias("director_id"),
-            col("crew_member.name").alias("director_name"),
+            col("crew_member.id").alias(
+                "director_id"
+            ),
+            col("crew_member.name").alias(
+                "director_name"
+            ),
             col("crew_member.department").alias(
                 "department"
             ),
-            col("crew_member.job").alias("job"),
+            col("crew_member.job").alias(
+                "job"
+            ),
         )
     )
 
-    movie_directors.write.mode("overwrite").parquet(
-        str(processed_path / "movie_directors")
+    movie_directors.write.mode(
+        "overwrite"
+    ).parquet(
+        str(
+            processed_path
+            / "movie_directors"
+        )
     )
 
     print("\nTRANSFORMATION FINISHED")
-    print(f"Snapshot date: {snapshot_date}")
+    print(
+        f"Snapshot date: {snapshot_date}"
+    )
 
     print("\nMovie actors:")
-    movie_actors.show(20, truncate=False)
+    movie_actors.show(
+        20,
+        truncate=False,
+    )
 
     print("\nMovie directors:")
-    movie_directors.show(20, truncate=False)
+    movie_directors.show(
+        20,
+        truncate=False,
+    )
 
     print("\nCounts:")
 
