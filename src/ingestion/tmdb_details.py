@@ -14,31 +14,59 @@ from src.config.settings import (
 )
 
 
-def get_movie_ids(snapshot_date: date):
-    movies_path = (
+def get_snapshot_path(
+    snapshot_date: date,
+) -> Path:
+
+    return (
         Path(RAW_DATA_PATH)
         / "tmdb"
         / snapshot_date.isoformat()
-        / "movies"
     )
 
-    movie_ids = set()
 
-    for file in movies_path.glob("movies_page_*.json"):
+def load_movie_ids(
+    snapshot_date: date,
+) -> list[int]:
 
-        with open(
-            file,
-            encoding="utf-8",
-        ) as f:
-            data = json.load(f)
+    manifest_path = (
+        get_snapshot_path(snapshot_date)
+        / "movie_ids.json"
+    )
 
-        for movie in data.get("results", []):
-            movie_ids.add(movie["id"])
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Manifest not found: {manifest_path}"
+        )
+
+    with open(
+        manifest_path,
+        "r",
+        encoding="utf-8",
+    ) as file:
+        movie_ids = json.load(file)
+
+    if not isinstance(movie_ids, list):
+        raise RuntimeError(
+            f"Invalid manifest: {manifest_path}"
+        )
+
+    if not movie_ids:
+        raise RuntimeError(
+            f"Manifest is empty: {manifest_path}"
+        )
+
+    if len(movie_ids) != len(set(movie_ids)):
+        raise RuntimeError(
+            "Manifest contains duplicate movie IDs"
+        )
 
     return movie_ids
 
 
-def get_movie_details(movie_id: int):
+def get_movie_details(
+    movie_id: int,
+):
 
     url = f"{TMDB_BASE_URL}/movie/{movie_id}"
 
@@ -58,15 +86,13 @@ def get_movie_details(movie_id: int):
     return response.json()
 
 
-def save_details(
-    data: dict,
+def get_details_path(
     snapshot_date: date,
-):
+    movie_id: int,
+) -> Path:
 
     details_path = (
-        Path(RAW_DATA_PATH)
-        / "tmdb"
-        / snapshot_date.isoformat()
+        get_snapshot_path(snapshot_date)
         / "details"
     )
 
@@ -75,47 +101,41 @@ def save_details(
         exist_ok=True,
     )
 
-    movie_id = data["id"]
-
-    file_path = (
+    return (
         details_path
         / f"movie_{movie_id}.json"
     )
+
+
+def save_details(
+    data: dict,
+    file_path: Path,
+):
 
     with open(
         file_path,
         "w",
         encoding="utf-8",
-    ) as f:
+    ) as file:
 
         json.dump(
             data,
-            f,
+            file,
             ensure_ascii=False,
             indent=4,
         )
 
 
-def run_ingestion(snapshot_date: date):
+def run_ingestion(
+    snapshot_date: date,
+):
 
-    movie_ids = get_movie_ids(
+    movie_ids = load_movie_ids(
         snapshot_date
     )
 
-    if not movie_ids:
-        raise RuntimeError(
-            f"No movies found for snapshot {snapshot_date}"
-        )
-
-    details_path = (
-        Path(RAW_DATA_PATH)
-        / "tmdb"
-        / snapshot_date.isoformat()
-        / "details"
-    )
-
     print(
-        f"Found movies: {len(movie_ids)}"
+        f"Movies in manifest: {len(movie_ids)}"
     )
 
     success = 0
@@ -123,17 +143,24 @@ def run_ingestion(snapshot_date: date):
     failed_movie_ids = []
 
     for index, movie_id in enumerate(
-        sorted(movie_ids),
-        1,
+        movie_ids,
+        start=1,
     ):
 
-        file_path = (
-            details_path
-            / f"movie_{movie_id}.json"
+        file_path = get_details_path(
+            snapshot_date,
+            movie_id,
         )
 
         if file_path.exists():
+
             skipped += 1
+
+            print(
+                f"{index}/{len(movie_ids)} "
+                f"skipped {movie_id}"
+            )
+
             continue
 
         try:
@@ -144,7 +171,7 @@ def run_ingestion(snapshot_date: date):
 
             save_details(
                 data,
-                snapshot_date,
+                file_path,
             )
 
             success += 1
@@ -174,6 +201,7 @@ def run_ingestion(snapshot_date: date):
     )
 
     if failed_movie_ids:
+
         raise RuntimeError(
             "Failed movie IDs: "
             f"{failed_movie_ids}"

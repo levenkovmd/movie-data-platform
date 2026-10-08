@@ -14,6 +14,9 @@ from src.config.settings import (
 )
 
 
+TARGET_MOVIES_COUNT = 6000
+
+
 def get_popular_movies(page: int) -> dict:
 
     url = f"{TMDB_BASE_URL}/movie/popular"
@@ -35,31 +38,75 @@ def get_popular_movies(page: int) -> dict:
     return response.json()
 
 
-def save_raw_page(
-    data: dict,
-    page: int,
+def get_snapshot_path(
     snapshot_date: date,
-):
+) -> Path:
 
-    raw_path = (
+    snapshot_path = (
         Path(RAW_DATA_PATH)
         / "tmdb"
         / snapshot_date.isoformat()
-        / "movies"
     )
 
-    raw_path.mkdir(
+    snapshot_path.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    filename = (
-        raw_path
+    return snapshot_path
+
+
+def get_page_path(
+    snapshot_date: date,
+    page: int,
+) -> Path:
+
+    movies_path = (
+        get_snapshot_path(snapshot_date)
+        / "movies"
+    )
+
+    movies_path.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    return (
+        movies_path
         / f"movies_page_{page:03d}.json"
     )
 
+
+def get_manifest_path(
+    snapshot_date: date,
+) -> Path:
+
+    return (
+        get_snapshot_path(snapshot_date)
+        / "movie_ids.json"
+    )
+
+
+def load_raw_page(
+    file_path: Path,
+) -> dict:
+
     with open(
-        filename,
+        file_path,
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        return json.load(file)
+
+
+def save_raw_page(
+    data: dict,
+    file_path: Path,
+):
+
+    with open(
+        file_path,
         "w",
         encoding="utf-8",
     ) as file:
@@ -72,55 +119,198 @@ def save_raw_page(
         )
 
     print(
-        f"[{datetime.now()}] Saved {filename}"
+        f"[{datetime.now()}] Saved {file_path}"
+    )
+
+
+def save_manifest(
+    movie_ids: list[int],
+    file_path: Path,
+):
+
+    with open(
+        file_path,
+        "w",
+        encoding="utf-8",
+    ) as file:
+
+        json.dump(
+            movie_ids,
+            file,
+            ensure_ascii=False,
+            indent=4,
+        )
+
+    print(
+        f"Manifest saved: {file_path}"
     )
 
 
 def run_ingestion(
     snapshot_date: date,
-    start_page: int = 1,
-    end_page: int = 300,
+    target_count: int = TARGET_MOVIES_COUNT,
 ):
 
-    failed_pages = []
+    manifest_path = get_manifest_path(
+        snapshot_date
+    )
 
-    for page in range(
-        start_page,
-        end_page + 1,
-    ):
+    # Если manifest уже создан,
+    # snapshot считаем завершенным.
+    if manifest_path.exists():
 
-        print(
-            f"Loading page {page}"
+        with open(
+            manifest_path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            movie_ids = json.load(file)
+
+        if (
+            len(movie_ids) == target_count
+            and len(set(movie_ids)) == target_count
+        ):
+
+            print(
+                f"Snapshot {snapshot_date} "
+                f"already contains "
+                f"{target_count} unique movies — skipped"
+            )
+
+            return
+
+        raise RuntimeError(
+            f"Invalid manifest: {manifest_path}"
         )
 
-        try:
+    unique_movie_ids = []
+    seen_movie_ids = set()
 
-            data = get_popular_movies(page)
+    saved_pages = 0
+    skipped_pages = 0
+
+    page = 1
+
+    while len(unique_movie_ids) < target_count:
+
+        file_path = get_page_path(
+            snapshot_date,
+            page,
+        )
+
+        if file_path.exists():
+
+            print(
+                f"Page {page} already exists — skipped"
+            )
+
+            data = load_raw_page(
+                file_path
+            )
+
+            skipped_pages += 1
+
+        else:
+
+            print(
+                f"Loading page {page}"
+            )
+
+            try:
+
+                data = get_popular_movies(
+                    page
+                )
+
+            except Exception as e:
+
+                raise RuntimeError(
+                    f"Failed page {page}: {e}"
+                ) from e
 
             save_raw_page(
                 data,
-                page,
-                snapshot_date,
+                file_path,
             )
 
-            print(
-                f"Movies loaded: {len(data['results'])}"
-            )
+            saved_pages += 1
 
-        except Exception as e:
+            time.sleep(1)
 
-            print(
-                f"ERROR page {page}: {e}"
-            )
-
-            failed_pages.append(page)
-
-        time.sleep(1)
-
-    if failed_pages:
-        raise RuntimeError(
-            f"Failed pages: {failed_pages}"
+        results = data.get(
+            "results",
+            [],
         )
+
+        for movie in results:
+
+            movie_id = movie["id"]
+
+            if movie_id in seen_movie_ids:
+                continue
+
+            seen_movie_ids.add(
+                movie_id
+            )
+
+            unique_movie_ids.append(
+                movie_id
+            )
+
+            if (
+                len(unique_movie_ids)
+                == target_count
+            ):
+                break
+
+        print(
+            f"Unique movies: "
+            f"{len(unique_movie_ids)}"
+            f"/{target_count}"
+        )
+
+        total_pages = data.get(
+            "total_pages"
+        )
+
+        if (
+            len(unique_movie_ids) < target_count
+            and total_pages is not None
+            and page >= total_pages
+        ):
+
+            raise RuntimeError(
+                f"TMDB pages exhausted: "
+                f"collected "
+                f"{len(unique_movie_ids)} "
+                f"unique movies, "
+                f"target is {target_count}"
+            )
+
+        page += 1
+
+    save_manifest(
+        unique_movie_ids,
+        manifest_path,
+    )
+
+    print("\nFinished")
+    print(
+        f"Unique movies: "
+        f"{len(unique_movie_ids)}"
+    )
+    print(
+        f"Pages scanned: {page}"
+    )
+    print(
+        f"Pages downloaded: "
+        f"{saved_pages}"
+    )
+    print(
+        f"Pages skipped: "
+        f"{skipped_pages}"
+    )
 
 
 if __name__ == "__main__":
@@ -137,6 +327,4 @@ if __name__ == "__main__":
 
     run_ingestion(
         snapshot_date=args.snapshot_date,
-        start_page=1,
-        end_page=300,
     )

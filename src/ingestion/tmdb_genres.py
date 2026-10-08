@@ -33,10 +33,9 @@ def get_genres():
     return response.json()
 
 
-def save_genres(
-    data: dict,
+def get_genres_path(
     snapshot_date: date,
-):
+) -> Path:
 
     genres_path = (
         Path(RAW_DATA_PATH)
@@ -50,10 +49,16 @@ def save_genres(
         exist_ok=True,
     )
 
-    file_path = (
+    return (
         genres_path
         / "genres.json"
     )
+
+
+def save_genres(
+    data: dict,
+    file_path: Path,
+):
 
     with open(
         file_path,
@@ -73,13 +78,28 @@ def save_genres(
     )
 
 
-def run_ingestion(snapshot_date: date):
+def run_ingestion(
+    snapshot_date: date,
+):
+
+    file_path = get_genres_path(
+        snapshot_date
+    )
+
+    if file_path.exists():
+
+        print(
+            f"Genres already exist for "
+            f"{snapshot_date} - skipped"
+        )
+
+        return
 
     genres = get_genres()
 
     save_genres(
         genres,
-        snapshot_date,
+        file_path,
     )
 
 
