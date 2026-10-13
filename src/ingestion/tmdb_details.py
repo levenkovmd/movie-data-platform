@@ -14,6 +14,22 @@ from src.config.settings import (
 )
 
 
+REQUEST_TIMEOUT = 30
+REQUEST_DELAY = 0.3
+MAX_RETRIES = 4
+BASE_RETRY_DELAY = 2
+
+
+def get_retry_delay(
+    attempt: int,
+) -> int:
+
+    return (
+        BASE_RETRY_DELAY
+        * 2 ** (attempt - 1)
+    )
+
+
 def get_snapshot_path(
     snapshot_date: date,
 ) -> Path:
@@ -66,7 +82,7 @@ def load_movie_ids(
 
 def get_movie_details(
     movie_id: int,
-):
+) -> dict:
 
     url = f"{TMDB_BASE_URL}/movie/{movie_id}"
 
@@ -74,16 +90,130 @@ def get_movie_details(
         "api_key": TMDB_API_KEY,
     }
 
-    response = requests.get(
-        url,
-        params=params,
-        proxies=PROXIES,
-        timeout=30,
-    )
+    for attempt in range(
+        1,
+        MAX_RETRIES + 1,
+    ):
 
-    response.raise_for_status()
+        try:
 
-    return response.json()
+            response = requests.get(
+                url,
+                params=params,
+                proxies=PROXIES,
+                timeout=REQUEST_TIMEOUT,
+            )
+
+            if response.status_code == 429:
+
+                if attempt == MAX_RETRIES:
+                    response.raise_for_status()
+
+                retry_after = (
+                    response.headers.get(
+                        "Retry-After"
+                    )
+                )
+
+                try:
+                    delay = int(
+                        retry_after
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    delay = get_retry_delay(
+                        attempt
+                    )
+
+                print(
+                    f"Movie {movie_id}: "
+                    f"rate limit 429, "
+                    f"retry in {delay} seconds",
+                    flush=True,
+                )
+
+                time.sleep(delay)
+
+                continue
+
+            if (
+                500
+                <= response.status_code
+                < 600
+            ):
+
+                if attempt == MAX_RETRIES:
+                    response.raise_for_status()
+
+                delay = get_retry_delay(
+                    attempt
+                )
+
+                print(
+                    f"Movie {movie_id}: "
+                    f"server error "
+                    f"{response.status_code}, "
+                    f"retry in {delay} seconds",
+                    flush=True,
+                )
+
+                time.sleep(delay)
+
+                continue
+
+            response.raise_for_status()
+
+            return response.json()
+
+        except requests.Timeout as e:
+
+            if attempt == MAX_RETRIES:
+                raise
+
+            delay = get_retry_delay(
+                attempt
+            )
+
+            print(
+                f"Movie {movie_id}: "
+                f"timeout on attempt "
+                f"{attempt}/{MAX_RETRIES}: "
+                f"{e}",
+                flush=True,
+            )
+
+            print(
+                f"Retry in {delay} seconds",
+                flush=True,
+            )
+
+            time.sleep(delay)
+
+        except requests.ConnectionError as e:
+
+            if attempt == MAX_RETRIES:
+                raise
+
+            delay = get_retry_delay(
+                attempt
+            )
+
+            print(
+                f"Movie {movie_id}: "
+                f"connection error on attempt "
+                f"{attempt}/{MAX_RETRIES}: "
+                f"{e}",
+                flush=True,
+            )
+
+            print(
+                f"Retry in {delay} seconds",
+                flush=True,
+            )
+
+            time.sleep(delay)
 
 
 def get_details_path(
@@ -135,7 +265,8 @@ def run_ingestion(
     )
 
     print(
-        f"Movies in manifest: {len(movie_ids)}"
+        f"Movies in manifest: {len(movie_ids)}",
+        flush=True,
     )
 
     success = 0
@@ -158,7 +289,8 @@ def run_ingestion(
 
             print(
                 f"{index}/{len(movie_ids)} "
-                f"skipped {movie_id}"
+                f"skipped {movie_id}",
+                flush=True,
             )
 
             continue
@@ -178,7 +310,8 @@ def run_ingestion(
 
             print(
                 f"{index}/{len(movie_ids)} "
-                f"saved {movie_id}"
+                f"saved {movie_id}",
+                flush=True,
             )
 
         except Exception as e:
@@ -188,16 +321,32 @@ def run_ingestion(
             )
 
             print(
-                f"ERROR {movie_id}: {e}"
+                f"ERROR {movie_id}: {e}",
+                flush=True,
             )
 
-        time.sleep(0.3)
+        time.sleep(
+            REQUEST_DELAY
+        )
 
-    print("\nFinished")
-    print(f"Saved: {success}")
-    print(f"Skipped: {skipped}")
     print(
-        f"Errors: {len(failed_movie_ids)}"
+        "\nFinished",
+        flush=True,
+    )
+
+    print(
+        f"Saved: {success}",
+        flush=True,
+    )
+
+    print(
+        f"Skipped: {skipped}",
+        flush=True,
+    )
+
+    print(
+        f"Errors: {len(failed_movie_ids)}",
+        flush=True,
     )
 
     if failed_movie_ids:

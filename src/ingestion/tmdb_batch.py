@@ -16,26 +16,183 @@ from src.config.settings import (
 
 TARGET_MOVIES_COUNT = 6000
 
+REQUEST_TIMEOUT = 30
+REQUEST_DELAY = 0.3
 
-def get_popular_movies(page: int) -> dict:
+MAX_RETRIES = 4
+BASE_RETRY_DELAY = 2
 
-    url = f"{TMDB_BASE_URL}/movie/popular"
+
+def log(message):
+    print(
+        message,
+        flush=True,
+    )
+
+
+def get_retry_delay(
+    attempt: int,
+) -> int:
+
+    return (
+        BASE_RETRY_DELAY
+        * 2 ** (attempt - 1)
+    )
+
+
+def get_popular_movies(
+    page: int,
+) -> dict:
+
+    url = (
+        f"{TMDB_BASE_URL}/movie/popular"
+    )
 
     params = {
         "api_key": TMDB_API_KEY,
         "page": page,
     }
 
-    response = requests.get(
-        url,
-        params=params,
-        proxies=PROXIES,
-        timeout=30,
-    )
+    for attempt in range(
+        1,
+        MAX_RETRIES + 1,
+    ):
 
-    response.raise_for_status()
+        try:
 
-    return response.json()
+            response = requests.get(
+                url,
+                params=params,
+                proxies=PROXIES,
+                timeout=REQUEST_TIMEOUT,
+            )
+
+            if response.status_code == 429:
+
+                if attempt == MAX_RETRIES:
+                    response.raise_for_status()
+
+                retry_after = (
+                    response.headers.get(
+                        "Retry-After"
+                    )
+                )
+
+                try:
+                    delay = int(
+                        retry_after
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    delay = get_retry_delay(
+                        attempt
+                    )
+
+                log(
+                    f"Page {page}: "
+                    f"rate limit 429"
+                )
+
+                log(
+                    f"Retry "
+                    f"{attempt}/{MAX_RETRIES} "
+                    f"in {delay} seconds"
+                )
+
+                time.sleep(
+                    delay
+                )
+
+                continue
+
+            if (
+                500
+                <= response.status_code
+                < 600
+            ):
+
+                if attempt == MAX_RETRIES:
+                    response.raise_for_status()
+
+                delay = get_retry_delay(
+                    attempt
+                )
+
+                log(
+                    f"Page {page}: "
+                    f"server error "
+                    f"{response.status_code}"
+                )
+
+                log(
+                    f"Retry "
+                    f"{attempt}/{MAX_RETRIES} "
+                    f"in {delay} seconds"
+                )
+
+                time.sleep(
+                    delay
+                )
+
+                continue
+
+            response.raise_for_status()
+
+            return response.json()
+
+        except requests.Timeout as e:
+
+            if attempt == MAX_RETRIES:
+                raise
+
+            delay = get_retry_delay(
+                attempt
+            )
+
+            log(
+                f"Page {page}: "
+                f"timeout on attempt "
+                f"{attempt}/{MAX_RETRIES}: "
+                f"{e}"
+            )
+
+            log(
+                f"Retry in "
+                f"{delay} seconds"
+            )
+
+            time.sleep(
+                delay
+            )
+
+
+        except requests.ConnectionError as e:
+
+            if attempt == MAX_RETRIES:
+                raise
+
+            delay = get_retry_delay(
+                attempt
+            )
+
+            log(
+                f"Page {page}: "
+                f"connection error on "
+                f"attempt "
+                f"{attempt}/{MAX_RETRIES}: "
+                f"{e}"
+            )
+
+            log(
+                f"Retry in "
+                f"{delay} seconds"
+            )
+
+            time.sleep(
+                delay
+            )
 
 
 def get_snapshot_path(
@@ -62,7 +219,9 @@ def get_page_path(
 ) -> Path:
 
     movies_path = (
-        get_snapshot_path(snapshot_date)
+        get_snapshot_path(
+            snapshot_date
+        )
         / "movies"
     )
 
@@ -82,7 +241,9 @@ def get_manifest_path(
 ) -> Path:
 
     return (
-        get_snapshot_path(snapshot_date)
+        get_snapshot_path(
+            snapshot_date
+        )
         / "movie_ids.json"
     )
 
@@ -97,7 +258,9 @@ def load_raw_page(
         encoding="utf-8",
     ) as file:
 
-        return json.load(file)
+        return json.load(
+            file
+        )
 
 
 def save_raw_page(
@@ -118,8 +281,9 @@ def save_raw_page(
             indent=4,
         )
 
-    print(
-        f"[{datetime.now()}] Saved {file_path}"
+    log(
+        f"[{datetime.now()}] "
+        f"Saved {file_path}"
     )
 
 
@@ -141,8 +305,9 @@ def save_manifest(
             indent=4,
         )
 
-    print(
-        f"Manifest saved: {file_path}"
+    log(
+        f"Manifest saved: "
+        f"{file_path}"
     )
 
 
@@ -151,12 +316,13 @@ def run_ingestion(
     target_count: int = TARGET_MOVIES_COUNT,
 ):
 
-    manifest_path = get_manifest_path(
-        snapshot_date
+    manifest_path = (
+        get_manifest_path(
+            snapshot_date
+        )
     )
 
-    # Если manifest уже создан,
-    # snapshot считаем завершенным.
+
     if manifest_path.exists():
 
         with open(
@@ -165,23 +331,31 @@ def run_ingestion(
             encoding="utf-8",
         ) as file:
 
-            movie_ids = json.load(file)
+            movie_ids = json.load(
+                file
+            )
 
         if (
-            len(movie_ids) == target_count
-            and len(set(movie_ids)) == target_count
+            len(movie_ids)
+            == target_count
+            and len(set(movie_ids))
+            == target_count
         ):
 
-            print(
-                f"Snapshot {snapshot_date} "
+            log(
+                f"Snapshot "
+                f"{snapshot_date} "
                 f"already contains "
-                f"{target_count} unique movies — skipped"
+                f"{target_count} "
+                f"unique movies "
+                f"— skipped"
             )
 
             return
 
         raise RuntimeError(
-            f"Invalid manifest: {manifest_path}"
+            f"Invalid manifest: "
+            f"{manifest_path}"
         )
 
     unique_movie_ids = []
@@ -192,17 +366,26 @@ def run_ingestion(
 
     page = 1
 
-    while len(unique_movie_ids) < target_count:
 
-        file_path = get_page_path(
-            snapshot_date,
-            page,
+    while (
+        len(unique_movie_ids)
+        < target_count
+    ):
+
+        file_path = (
+            get_page_path(
+                snapshot_date,
+                page,
+            )
         )
+
 
         if file_path.exists():
 
-            print(
-                f"Page {page} already exists — skipped"
+            log(
+                f"Page {page} "
+                f"already exists "
+                f"— skipped"
             )
 
             data = load_raw_page(
@@ -211,22 +394,27 @@ def run_ingestion(
 
             skipped_pages += 1
 
+
         else:
 
-            print(
-                f"Loading page {page}"
+            log(
+                f"Loading page "
+                f"{page}"
             )
 
             try:
 
-                data = get_popular_movies(
-                    page
+                data = (
+                    get_popular_movies(
+                        page
+                    )
                 )
 
             except Exception as e:
 
                 raise RuntimeError(
-                    f"Failed page {page}: {e}"
+                    f"Failed page "
+                    f"{page}: {e}"
                 ) from e
 
             save_raw_page(
@@ -236,7 +424,9 @@ def run_ingestion(
 
             saved_pages += 1
 
-            time.sleep(1)
+            time.sleep(
+                REQUEST_DELAY
+            )
 
         results = data.get(
             "results",
@@ -245,9 +435,14 @@ def run_ingestion(
 
         for movie in results:
 
-            movie_id = movie["id"]
+            movie_id = (
+                movie["id"]
+            )
 
-            if movie_id in seen_movie_ids:
+            if (
+                movie_id
+                in seen_movie_ids
+            ):
                 continue
 
             seen_movie_ids.add(
@@ -264,7 +459,7 @@ def run_ingestion(
             ):
                 break
 
-        print(
+        log(
             f"Unique movies: "
             f"{len(unique_movie_ids)}"
             f"/{target_count}"
@@ -275,7 +470,8 @@ def run_ingestion(
         )
 
         if (
-            len(unique_movie_ids) < target_count
+            len(unique_movie_ids)
+            < target_count
             and total_pages is not None
             and page >= total_pages
         ):
@@ -285,29 +481,38 @@ def run_ingestion(
                 f"collected "
                 f"{len(unique_movie_ids)} "
                 f"unique movies, "
-                f"target is {target_count}"
+                f"target is "
+                f"{target_count}"
             )
 
         page += 1
+
 
     save_manifest(
         unique_movie_ids,
         manifest_path,
     )
 
-    print("\nFinished")
-    print(
+    log(
+        "\nFinished"
+    )
+
+    log(
         f"Unique movies: "
         f"{len(unique_movie_ids)}"
     )
-    print(
-        f"Pages scanned: {page}"
+
+    log(
+        f"Pages scanned: "
+        f"{page - 1}"
     )
-    print(
+
+    log(
         f"Pages downloaded: "
         f"{saved_pages}"
     )
-    print(
+
+    log(
         f"Pages skipped: "
         f"{skipped_pages}"
     )
@@ -315,7 +520,9 @@ def run_ingestion(
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser()
+    parser = (
+        argparse.ArgumentParser()
+    )
 
     parser.add_argument(
         "--snapshot-date",
@@ -323,8 +530,12 @@ if __name__ == "__main__":
         default=date.today(),
     )
 
-    args = parser.parse_args()
+    args = (
+        parser.parse_args()
+    )
 
     run_ingestion(
-        snapshot_date=args.snapshot_date,
+        snapshot_date=(
+            args.snapshot_date
+        ),
     )
