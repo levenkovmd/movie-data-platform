@@ -10,3 +10,5 @@ data/processed/*
 .venv/
 
 .airflow/
+
+start_airflow.sh
