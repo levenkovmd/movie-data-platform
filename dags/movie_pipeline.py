@@ -5,7 +5,7 @@ from pendulum import datetime
 
 PROJECT_DIR = "/home/user/projects/movie-data-platform"
 
-SNAPSHOT_DATE = "{{ params.snapshot_date }}"
+SNAPSHOT_DATE = "{{ data_interval_end | ds }}"
 
 
 def python_task(
@@ -47,22 +47,16 @@ def sql_task(
 
 @dag(
     dag_id="movie_pipeline",
-    schedule=None,
+    schedule="0 15 * * 2,4,6",
     start_date=datetime(
         2026,
         10,
         1,
-        tz="UTC",
+        tz="Europe/Moscow",
     ),
     catchup=False,
-    params={
-        "snapshot_date": "2026-10-07",
-    },
 )
 def movie_pipeline():
-
-    # INGESTION
-    
 
     ingest_movies = python_task(
         task_id="ingest_movies",
@@ -89,11 +83,6 @@ def movie_pipeline():
         module="src.quality.check_raw",
     )
 
-
-    
-    # PROCESSING
-    
-
     transform_movies = python_task(
         task_id="transform_movies",
         module="src.processing.movies_transform",
@@ -108,10 +97,6 @@ def movie_pipeline():
         task_id="check_processed",
         module="src.quality.data_quality",
     )
-
-
-    # DWH LOADING
-    
 
     load_date = python_task(
         task_id="load_date",
@@ -148,20 +133,10 @@ def movie_pipeline():
         module="src.loading.fact_movie_loader",
     )
 
-
-
-    # DWH QUALITY
-
-
     check_dwh = sql_task(
         task_id="check_dwh",
         sql_file="src/quality/dwh_quality.sql",
     )
-
-
-
-    # ANALYTICAL MARTS
-
 
     build_movie_performance = sql_task(
         task_id="build_movie_performance",
@@ -188,10 +163,6 @@ def movie_pipeline():
         sql_file="sql/marts/mart_quality.sql",
     )
 
-
-    
-    # DEPENDENCIES
-
     ingest_movies >> [
         ingest_details,
         ingest_credits,
@@ -203,7 +174,6 @@ def movie_pipeline():
         ingest_genres,
     ] >> check_raw
 
-
     check_raw >> [
         transform_movies,
         transform_credits,
@@ -214,14 +184,12 @@ def movie_pipeline():
         transform_credits,
     ] >> check_processed
 
-
     check_processed >> [
         load_date,
         load_movies,
         load_genres,
         load_actors,
     ]
-
 
     [
         load_movies,
@@ -233,16 +201,13 @@ def movie_pipeline():
         load_actors,
     ] >> load_movie_actors
 
-
     [
         load_date,
         load_movie_genres,
         load_movie_actors,
     ] >> load_fact
 
-
     load_fact >> check_dwh
-
 
     check_dwh >> [
         build_movie_performance,
@@ -250,7 +215,6 @@ def movie_pipeline():
         build_actor_stats,
         build_movie_trends,
     ]
-
 
     [
         build_movie_performance,
