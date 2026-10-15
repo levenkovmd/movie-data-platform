@@ -5,13 +5,13 @@ CREATE TABLE mart_movie_trends (
     movie_id BIGINT NOT NULL,
     title TEXT NOT NULL,
 
-    popularity DOUBLE PRECISION,
-    previous_popularity DOUBLE PRECISION,
-    popularity_change DOUBLE PRECISION,
+    popularity NUMERIC(12, 4),
+    previous_popularity NUMERIC(12, 4),
+    popularity_change NUMERIC(12, 4),
 
-    vote_average DOUBLE PRECISION,
-    previous_vote_average DOUBLE PRECISION,
-    vote_average_change DOUBLE PRECISION,
+    vote_average NUMERIC(6, 3),
+    previous_vote_average NUMERIC(6, 3),
+    vote_average_change NUMERIC(6, 3),
 
     vote_count BIGINT,
     previous_vote_count BIGINT,
@@ -69,16 +69,16 @@ SELECT
     movie_id,
     title,
 
-    popularity,
-    previous_popularity,
-    popularity - previous_popularity AS popularity_change,
+    ROUND(popularity::NUMERIC, 4),
+    ROUND(previous_popularity::NUMERIC, 4),
+    ROUND((popularity - previous_popularity)::NUMERIC, 4),
 
-    vote_average,
-    previous_vote_average,
-    vote_average - previous_vote_average AS vote_average_change,
+    ROUND(vote_average::NUMERIC, 3),
+    ROUND(previous_vote_average::NUMERIC, 3),
+    ROUND((vote_average - previous_vote_average)::NUMERIC, 3),
 
     vote_count,
     previous_vote_count,
-    vote_count - previous_vote_count AS vote_count_change
+    vote_count - previous_vote_count
 
 FROM trends;
