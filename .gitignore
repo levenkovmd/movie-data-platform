@@ -12,3 +12,4 @@ data/processed/*
 .airflow/
 
 start_airflow.sh
+sql.sh
