@@ -168,6 +168,11 @@ data/processed/tmdb/<snapshot_date>/
 - основной жанр;
 - язык фильма.
 
+### Bridge-таблицы
+
+- `bridge_movie_genre` — связь фильмов и жанров;
+- `bridge_movie_actor` — связь фильмов и актеров.
+
 Благодаря хранению `snapshot_date` можно отслеживать изменение показателей одного и того же фильма во времени.
 
 Пример:
@@ -320,6 +325,7 @@ movie-data-platform/
 │   ├── raw/
 │   └── processed/
 ├── sql/
+│   ├── ddl/
 │   └── marts/
 ├── src/
 │   ├── config/
@@ -327,27 +333,65 @@ movie-data-platform/
 │   ├── processing/
 │   ├── loading/
 │   └── quality/
-├── tests/
 ├── pyproject.toml
 ├── uv.lock
 └── README.md
 ```
 
-## Текущий статус и планы развития
+## Результат
 
-На данный момент реализован полный ETL-пайплайн:
+Для каждого запуска формируется snapshot из 6000 уникальных фильмов.
 
-- получение данных из TMDB API;
-- формирование исторических snapshot;
-- обработка данных с помощью PySpark;
-- проверки качества raw и processed данных;
-- загрузка данных в PostgreSQL DWH;
-- построение аналитических витрин;
-- оркестрация процессов с помощью Apache Airflow;
-- автоматический запуск по расписанию;
-- retry-механизм и идемпотентные повторные запуски.
+Накопление исторических snapshot позволяет анализировать:
 
-В дальнейшем планируется:
+- изменение популярности фильмов;
+- изменение рейтинга;
+- прирост количества пользовательских оценок;
+- показатели жанров;
+- показатели фильмов с участием конкретных актеров.
+
+## Запуск проекта
+
+Для работы PySpark требуется Java 17+.
+
+Установка Java в Ubuntu / WSL:
+
+```bash
+sudo apt update
+sudo apt install openjdk-17-jdk
+
+Установка зависимостей:
+
+```bash
+uv sync
+```
+
+Установка Apache Airflow:
+
+```bash
+uv tool install --with-executables-from apache-airflow-core "apache-airflow==3.3.2"
+```
+
+Для работы проекта необходимо создать `.env`:
+
+```env
+POSTGRES_HOST=...
+POSTGRES_PORT=5432
+POSTGRES_DB=movie_data
+POSTGRES_USER=...
+POSTGRES_PASSWORD=...
+TMDB_API_KEY=...
+```
+
+Запуск Airflow:
+
+```bash
+export AIRFLOW_HOME="$PWD/.airflow"
+export AIRFLOW__CORE__DAGS_FOLDER="$PWD/dags"
+airflow standalone
+```
+
+## Планы развития
 
 - провести EDA собранных данных;
 - добавить визуализацию и dashboard;
