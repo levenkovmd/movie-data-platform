@@ -359,6 +359,7 @@ movie-data-platform/
 ```bash
 sudo apt update
 sudo apt install openjdk-17-jdk
+```
 
 Установка зависимостей:
 
